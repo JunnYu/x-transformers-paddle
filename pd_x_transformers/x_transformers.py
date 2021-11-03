@@ -7,19 +7,17 @@ import numpy as np
 import paddle
 import paddle.nn.functional as F
 import torch
-from einops import rearrange, repeat
-
-
 from paddle import einsum, nn
-from paddle.nn.initializer import Assign, Constant, KaimingNormal
 from paddle.fluid.data_feeder import convert_dtype
+from paddle.nn.initializer import Assign, Constant, KaimingNormal
+
+from einops import rearrange, repeat
 
 # TODO
 entmax15 = None
 
 
 from pd_x_transformers.autoregressive_wrapper import AutoregressiveWrapper
-
 
 # constants
 
@@ -145,11 +143,13 @@ class AbsolutePositionalEmbedding(nn.Layer):
 class FixedPositionalEmbedding(nn.Layer):
     def __init__(self, dim):
         super().__init__()
-        inv_freq = 1.0 / (10000 ** (paddle.arange(0, dim, 2).float() / dim))
+        inv_freq = 1.0 / (
+            10000 ** (paddle.arange(0, dim, 2, dtype=paddle.get_default_dtype()) / dim)
+        )
         self.register_buffer("inv_freq", inv_freq)
 
     def forward(self, x, seq_dim=1, offset=0):
-        t = paddle.arange(x.shape[seq_dim]).type_as(self.inv_freq) + offset
+        t = paddle.arange(x.shape[seq_dim], dtype=self.inv_freq.dtype) + offset
         sinusoid_inp = paddle.einsum("i , j -> i j", t, self.inv_freq)
         emb = paddle.concat((sinusoid_inp.sin(), sinusoid_inp.cos()), axis=-1)
         return rearrange(emb, "n d -> () n d")
@@ -181,11 +181,11 @@ class RelativePositionBias(nn.Layer):
         is_small = n < max_exact
 
         val_if_large = max_exact + (
-            paddle.log(n.float() / max_exact)
+            paddle.log(n.astype("float64") / max_exact)
             / math.log(max_distance / max_exact)
             * (num_buckets - max_exact)
         ).astype("int64")
-        val_if_large = paddle.min(
+        val_if_large = paddle.minimum(
             val_if_large, paddle.full_like(val_if_large, num_buckets - 1)
         )
 
@@ -308,8 +308,10 @@ class Scale(nn.Layer):
         self.fn = fn
 
     def forward(self, x, **kwargs):
-        x, *rest = self.fn(x, **kwargs)
-        return (x * self.value, *rest)
+        # x, *rest = self.fn(x, **kwargs)
+        # return (x * self.value, *rest)
+        x = self.fn(x, **kwargs)
+        return x * self.value
 
 
 class Rezero(nn.Layer):
@@ -362,7 +364,8 @@ class Residual(nn.Layer):
     def forward(self, x, residual):
         if exists(self.residual_scale):
             residual = residual * self.residual_scale
-
+        if isinstance(x, tuple):
+            x = x[0]
         return x + residual
 
 
@@ -568,7 +571,7 @@ class Attention(nn.Layer):
         # attention on attention
         self.attn_on_attn = on_attn
         self.to_out = (
-            nn.Sequential(nn.Linear(v_dim, dim * 2), nn.GLU())
+            nn.Sequential(nn.Linear(v_dim, dim * 2), GLU())
             if on_attn
             else nn.Linear(v_dim, dim)
         )

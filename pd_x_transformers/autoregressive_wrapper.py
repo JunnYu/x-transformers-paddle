@@ -12,15 +12,14 @@ def exists(val):
     return val is not None
 
 
-neg_inf = -1e4
+pos_nef = 1e4
+neg_inf = -pos_nef
 # nucleus
 
 
 def top_p(logits, thres=0.9):
     sorted_logits, sorted_indices = paddle.topk(logits, k=logits.shape[-1])
-    cum_probs = paddle.cumsum(
-        paddle.nn.functional.softmax(sorted_logits, axis=-1), axis=-1
-    )
+    cum_probs = paddle.cumsum(F.softmax(sorted_logits, axis=-1), axis=-1)
     sorted_indices_to_remove = (cum_probs > (1 - thres)).astype("int64")
     sorted_indices_to_remove[:, 1:] = sorted_indices_to_remove[:, :-1].clone()
     sorted_indices_to_remove[:, 0] = 0
@@ -37,6 +36,22 @@ def top_p(logits, thres=0.9):
     logits = paddle.where(condition, paddle.full_like(logits, neg_inf), logits)
 
     return logits
+
+
+def top_p_new(logits, thres=0.9):
+    sorted_logits = paddle.sort(logits, axis=-1, descending=True)
+    cum_probs = paddle.cumsum(F.softmax(sorted_logits, axis=-1), axis=-1)
+    cum_probs[:, 1:] = cum_probs[:, :-1].clone()
+    cum_probs[:, 0] = 0
+    logits_masked = paddle.where(
+        cum_probs > (1 - thres),
+        paddle.to_tensor(pos_nef, dtype=sorted_logits.dtype),
+        sorted_logits,
+    )
+    min_logits = paddle.min(logits_masked, axis=1, keepdim=True)
+    return paddle.where(
+        logits >= min_logits, logits, paddle.to_tensor(neg_inf, dtype=logits.dtype)
+    )
 
 
 # topk
