@@ -364,8 +364,7 @@ class Residual(nn.Layer):
     def forward(self, x, residual):
         if exists(self.residual_scale):
             residual = residual * self.residual_scale
-        if isinstance(x, tuple):
-            x = x[0]
+
         return x + residual
 
 
