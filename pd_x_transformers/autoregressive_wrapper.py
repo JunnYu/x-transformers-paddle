@@ -4,8 +4,7 @@ import paddle
 import paddle.nn.functional as F
 from paddle import nn
 
-# TODO
-entmax_bisect = None
+from pd_x_transformers.entmax_bisect import entmax_bisect
 
 
 def exists(val):

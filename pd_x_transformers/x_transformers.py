@@ -12,12 +12,8 @@ from paddle.fluid.data_feeder import convert_dtype
 from paddle.nn.initializer import Assign, Constant, KaimingNormal
 
 from einops import rearrange, repeat
-
-# TODO
-entmax15 = None
-
-
 from pd_x_transformers.autoregressive_wrapper import AutoregressiveWrapper
+from pd_x_transformers.entmax15 import entmax15
 
 # constants
 
