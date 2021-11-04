@@ -6,7 +6,7 @@ from inspect import isfunction
 import numpy as np
 import paddle
 import paddle.nn.functional as F
-import torch
+
 from paddle import einsum, nn
 from paddle.fluid.data_feeder import convert_dtype
 from paddle.nn.initializer import Assign, Constant, KaimingNormal
@@ -393,7 +393,7 @@ def shift(t, amount, mask=None):
         return t
 
     if exists(mask):
-        t = paddle.where(mask[..., None], t, torch.zeros((1,)))
+        t = paddle.where(mask[..., None], t, paddle.zeros((1,), dtype=t.dtype))
 
     if t.ndim == 2:
         return F.pad(t[..., :-amount, :][None], (amount, 0), data_format="NLC").squeeze(
