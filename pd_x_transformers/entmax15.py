@@ -1,6 +1,8 @@
 import paddle
 from paddle.autograd import PyLayer
 
+default_dtype = paddle.get_default_dtype()
+
 
 def _roll_last(X, axis):
     if axis == -1:
@@ -87,8 +89,8 @@ def _entmax_threshold_and_support(X, axis=-1, k=None):
             _roll_last(tau_star, axis)[unsolved] = tau_
             # cast
             raw_dtype = support_size.dtype
-            _roll_last(support_size.astype("float64"), axis)[unsolved] = ss_.astype(
-                "float64"
+            _roll_last(support_size.astype(default_dtype), axis)[unsolved] = ss_.astype(
+                default_dtype
             )
             support_size = support_size.astype(raw_dtype)
 

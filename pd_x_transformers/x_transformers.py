@@ -6,7 +6,6 @@ from inspect import isfunction
 import numpy as np
 import paddle
 import paddle.nn.functional as F
-
 from paddle import einsum, nn
 from paddle.fluid.data_feeder import convert_dtype
 from paddle.nn.initializer import Assign, Constant, KaimingNormal
@@ -23,6 +22,7 @@ Intermediates = namedtuple("Intermediates", ["pre_softmax_attn", "post_softmax_a
 
 LayerIntermediates = namedtuple("Intermediates", ["hiddens", "attn_intermediates"])
 
+default_dtype = paddle.get_default_dtype()
 # helpers
 
 
@@ -177,7 +177,7 @@ class RelativePositionBias(nn.Layer):
         is_small = n < max_exact
 
         val_if_large = max_exact + (
-            paddle.log(n.astype("float64") / max_exact)
+            paddle.log(n.astype(default_dtype) / max_exact)
             / math.log(max_distance / max_exact)
             * (num_buckets - max_exact)
         ).astype("int64")
@@ -240,7 +240,7 @@ class AlibiPositionalBias(nn.Layer):
         bias = paddle.arange(j)
         bias = rearrange(bias, "j -> () () () j")
         bias = bias * self.slopes
-        # TODO
+
         bias = F.pad(bias, (0, 0, 0, h - bias.shape[1]), data_format="NHWC")
         self.register_buffer("bias", bias, persistent=False)
         return qk_dots + self.bias
@@ -257,7 +257,7 @@ class LearnedAlibiPositionalBias(AlibiPositionalBias):
         h, i, j = qk_dots.shape[-3:]
 
         slopes = self.learned_logslopes.exp()
-        # TODO
+
         slopes = F.pad(slopes, (0, 0, 0, h - slopes.shape[1]), data_format="NHWC")
 
         if exists(self.bias) and self.bias.shape[-1] >= j:
@@ -653,9 +653,8 @@ class Attention(nn.Layer):
             k = paddle.concat((mem_k, k), axis=-2)
             v = paddle.concat((mem_v, v), axis=-2)
             if exists(input_mask):
-                # TODO
                 input_mask = F.pad(
-                    input_mask.astype("float64"),
+                    input_mask.astype(default_dtype),
                     (self.num_mem_kv, 0, 0, 0),
                     value=1,
                     data_format="NCHW",
@@ -696,9 +695,12 @@ class Attention(nn.Layer):
             i, j = dots.shape[-2:]
             r = paddle.arange(i)
             mask = rearrange(r, "i -> () () i ()") < rearrange(r, "j -> () () () j")
-            # TODO
+
             mask = F.pad(
-                mask.astype("float64"), (j - i, 0, 0, 0), value=0, data_format="NCHW"
+                mask.astype(default_dtype),
+                (j - i, 0, 0, 0),
+                value=0,
+                data_format="NCHW",
             ).astype(mask.dtype)
             dots = paddle.where(mask, mask_value, dots)
             del mask
@@ -1136,7 +1138,7 @@ class TransformerWrapper(nn.Layer):
         self.to_logits = (
             nn.Linear(dim, num_tokens)
             if not tie_embedding
-            else lambda t: t @ self.token_emb.weight  # TODO
+            else lambda t: t @ self.token_emb.weight
         )
 
         # memory tokens (like [cls]) from Memory Transformers paper
@@ -1171,11 +1173,10 @@ class TransformerWrapper(nn.Layer):
 
             # auto-handle masking after appending memory tokens
             if exists(mask):
-                # TODO
                 if mask.ndim == 2:
                     mask = (
                         F.pad(
-                            mask[None].astype("float64"),
+                            mask[None].astype(default_dtype),
                             (num_mem, 0),
                             value=1,
                             data_format="NCL",

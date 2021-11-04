@@ -15,6 +15,8 @@ pos_nef = 1e4
 neg_inf = -pos_nef
 # nucleus
 
+default_dtype = paddle.get_default_dtype()
+
 
 def top_p(logits, thres=0.9):
     sorted_logits, sorted_indices = paddle.topk(logits, k=logits.shape[-1])
@@ -142,7 +144,10 @@ class AutoregressiveWrapper(nn.Layer):
             out = paddle.concat((out, sample), axis=-1)
             mask = (
                 F.pad(
-                    mask[None].astype("float64"), (0, 1), value=True, data_format="NCL"
+                    mask[None].astype(default_dtype),
+                    (0, 1),
+                    value=True,
+                    data_format="NCL",
                 )
                 .squeeze(0)
                 .astype("bool")
@@ -155,7 +160,9 @@ class AutoregressiveWrapper(nn.Layer):
                     shifted_is_eos_tokens = F.pad(
                         is_eos_tokens[..., :-1][None], (1, 0), data_format="NCL"
                     ).squeeze(0)
-                    mask = shifted_is_eos_tokens.astype("float64").cumsum(axis=-1) >= 1
+                    mask = (
+                        shifted_is_eos_tokens.astype(default_dtype).cumsum(axis=-1) >= 1
+                    )
                     out = paddle.where(
                         mask, paddle.to_tensor(self.pad_value, dtype=mask.dtype), out
                     )
