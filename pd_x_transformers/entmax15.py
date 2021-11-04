@@ -96,9 +96,8 @@ def _entmax_threshold_and_support(X, axis=-1, k=None):
 
 
 class Entmax15Function(PyLayer):
-    @classmethod
-    def forward(cls, ctx, X, axis=0, k=None):
-        ctx.axis = axis
+    @staticmethod
+    def forward(ctx, X, axis=0, k=None):
         max_val = X.max(axis=axis, keepdim=True)
         X = X - max_val  # same numerical stability trick as for softmax
         X = X / 2  # divide by 2 to solve actual Entmax
@@ -106,12 +105,13 @@ class Entmax15Function(PyLayer):
         tau_star, _ = _entmax_threshold_and_support(X, axis=axis, k=k)
 
         Y = paddle.clip(X - tau_star, min=0) ** 2
-        ctx.save_for_backward(Y)
+        ctx.save_for_backward(Y.detach())
+        ctx.axis = axis
         return Y
 
-    @classmethod
-    def backward(cls, ctx, dY):
-        (Y,) = ctx.saved_tensors
+    @staticmethod
+    def backward(ctx, dY):
+        (Y,) = ctx.saved_tensor()
         gppr = paddle.sqrt(Y)  # = 1 / g'' (Y)
         dX = dY * gppr
         q = dX.sum(ctx.axis) / gppr.sum(ctx.axis)

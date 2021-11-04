@@ -349,7 +349,6 @@ Alternatively, if you would like to use `entmax15`, you can also do so with one 
 import paddle
 from pd_x_transformers import TransformerWrapper, Decoder
 
-# entmax15 TODO paddle version
 model = TransformerWrapper(
     num_tokens = 20000,
     max_seq_len = 1024,

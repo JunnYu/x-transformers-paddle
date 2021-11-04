@@ -20,14 +20,13 @@ class EntmaxBisectFunction(PyLayer):
         cls,
         ctx,
         X,
-        alpha=paddle.to_tensor(1.5),
+        alpha=1.5,
         axis=-1,
         n_iter=50,
         ensure_sum_one=True,
     ):
 
-        if not isinstance(alpha, paddle.Tensor):
-            alpha = paddle.to_tensor(alpha, dtype=X.dtype)
+        ctx.need_alpha_grad = not alpha.stop_gradient
 
         alpha_shape = X.shape
         alpha_shape[axis] = 1
@@ -61,13 +60,13 @@ class EntmaxBisectFunction(PyLayer):
         if ensure_sum_one:
             p_m /= p_m.sum(axis=axis).unsqueeze(axis=axis)
 
-        ctx.save_for_backward(p_m)
+        ctx.save_for_backward(p_m.detach())
 
         return p_m
 
     @classmethod
     def backward(cls, ctx, dY):
-        (Y,) = ctx.saved_tensors
+        (Y,) = ctx.saved_tensor()
 
         gppr = paddle.where(Y > 0, Y ** (2 - ctx.alpha), paddle.zeros((1,)))
 
@@ -77,7 +76,7 @@ class EntmaxBisectFunction(PyLayer):
         dX -= q * gppr
 
         d_alpha = None
-        if ctx.needs_input_grad[1]:
+        if ctx.need_alpha_grad:
 
             # alpha gradient computation
             # d_alpha = (partial_y / partial_alpha) * dY
@@ -139,6 +138,8 @@ def entmax_bisect(X, alpha=1.5, axis=-1, n_iter=50, ensure_sum_one=True):
     P : paddle tensor, same shape as X
         The projection result, such that P.sum(axis=axis) == 1 elementwise.
     """
+    if not isinstance(alpha, paddle.Tensor):
+        alpha = paddle.to_tensor(alpha, dtype=X.dtype)
     return EntmaxBisectFunction.apply(X, alpha, axis, n_iter, ensure_sum_one)
 
 
