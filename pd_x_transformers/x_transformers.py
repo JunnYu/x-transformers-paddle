@@ -242,7 +242,8 @@ class AlibiPositionalBias(nn.Layer):
         bias = rearrange(bias, "j -> () () () j")
         bias = bias * self.slopes
 
-        bias = F.pad(bias, (0, 0, 0, h - bias.shape[1]), data_format="NHWC")
+        num_heads_unalibied = h - bias.shape[1]
+        bias = F.pad(bias, (0, 0, 0, num_heads_unalibied), data_format="NHWC")
         self.register_buffer("bias", bias, persistent=False)
         return qk_dots + self.bias
 
@@ -306,10 +307,10 @@ class Scale(nn.Layer):
         self.fn = fn
 
     def forward(self, x, **kwargs):
-        # x, *rest = self.fn(x, **kwargs)
-        # return (x * self.value, *rest)
-        x = self.fn(x, **kwargs)
-        return x * self.value
+        x, *rest = self.fn(x, **kwargs)
+        return (x * self.value, *rest)
+        # x = self.fn(x, **kwargs)
+        # return x * self.value
 
 
 class Rezero(nn.Layer):
@@ -906,7 +907,7 @@ class AttentionLayers(nn.Layer):
                 layer = ShiftTokens(
                     range(shift_range_lower, shift_range_upper), layer)
 
-            if isinstance(layer, Attention) and exists(branch_fn):
+            if isinstance(layer, Attention, FeedForward) and exists(branch_fn):
                 layer = branch_fn(layer)
 
             residual_fn = GRUGating if gate_residual else Residual
