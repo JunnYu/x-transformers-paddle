@@ -307,10 +307,13 @@ class Scale(nn.Layer):
         self.fn = fn
 
     def forward(self, x, **kwargs):
-        x, *rest = self.fn(x, **kwargs)
-        return (x * self.value, *rest)
-        # x = self.fn(x, **kwargs)
-        # return x * self.value
+        out = self.fn(x, **kwargs)
+        scale_fn = lambda t: t * self.value
+
+        if not isinstance(out, tuple):
+            return scale_fn(out)
+
+        return (scale_fn(out[0]), *out[1:])
 
 
 class Rezero(nn.Layer):
@@ -321,8 +324,13 @@ class Rezero(nn.Layer):
             shape=(1, ), default_initializer=Constant(1.0))
 
     def forward(self, x, **kwargs):
-        x, *rest = self.fn(x, **kwargs)
-        return (x * self.g, *rest)
+        out = self.fn(x, **kwargs)
+        rezero_fn = lambda t: t * self.g
+
+        if not isinstance(out, tuple):
+            return rezero_fn(out)
+
+        return (rezero_fn(out[0]), *out[1:])
 
 
 class ScaleNorm(nn.Layer):
@@ -907,7 +915,7 @@ class AttentionLayers(nn.Layer):
                 layer = ShiftTokens(
                     range(shift_range_lower, shift_range_upper), layer)
 
-            if isinstance(layer, Attention, FeedForward) and exists(branch_fn):
+            if exists(branch_fn):
                 layer = branch_fn(layer)
 
             residual_fn = GRUGating if gate_residual else Residual
