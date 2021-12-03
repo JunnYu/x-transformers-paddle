@@ -117,7 +117,7 @@ model = ViTransformerWrapper(
     )
 )
 
-img = paddle.randn(1, 3, 256, 256)
+img = paddle.randn((1, 3, 256, 256))
 model(img) # (1, 1000)
 ```
 
@@ -148,7 +148,7 @@ decoder = TransformerWrapper(
     )
 )
 
-img = paddle.randn(1, 3, 256, 256)
+img = paddle.randn((1, 3, 256, 256))
 caption = paddle.randint(0, 20000, (1, 1024))
 
 encoded = encoder(img, return_embeddings = True)
@@ -932,11 +932,11 @@ from pd_x_transformers import Encoder, CrossAttender
 enc = Encoder(dim = 512, depth = 6)
 model = CrossAttender(dim = 512, depth = 6)
 
-nodes = paddle.randn(1, 1, 512)
-node_masks = paddle.ones(1, 1).astype("bool")
+nodes = paddle.randn((1, 1, 512))
+node_masks = paddle.ones((1, 1)).astype("bool")
 
-neighbors = paddle.randn(1, 5, 512)
-neighbor_masks = paddle.ones(1, 5).astype("bool")
+neighbors = paddle.randn((1, 5, 512))
+neighbor_masks = paddle.ones((1, 5)).astype("bool")
 
 encoded_neighbors = enc(neighbors, mask = neighbor_masks)
 model(nodes, context = encoded_neighbors, mask = node_masks, context_mask = neighbor_masks) # (1, 1, 512)
@@ -961,7 +961,7 @@ model = ContinuousTransformerWrapper(
 )
 
 x = paddle.randn((1, 1024, 32))
-mask = paddle.ones(1, 1024).astype("bool")
+mask = paddle.ones((1, 1024)).astype("bool")
 
 model(x, mask = mask) # (1, 1024, 100)
 ```
