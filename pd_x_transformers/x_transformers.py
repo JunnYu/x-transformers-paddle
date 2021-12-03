@@ -13,17 +13,15 @@ from paddle.nn.initializer import Assign, Constant, KaimingNormal
 from einops import rearrange, repeat
 from pd_x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 from pd_x_transformers.entmax15 import entmax15
-
 # constants
 
 DEFAULT_DIM_HEAD = 64
 
-Intermediates = namedtuple("Intermediates",
-                           ["pre_softmax_attn", "post_softmax_attn"])
+Intermediates = namedtuple('Intermediates',
+                           ['pre_softmax_attn', 'post_softmax_attn'])
 
-LayerIntermediates = namedtuple("Intermediates",
-                                ["hiddens", "attn_intermediates"])
-
+LayerIntermediates = namedtuple('Intermediates',
+                                ['hiddens', 'attn_intermediates'])
 default_dtype = paddle.get_default_dtype()
 
 # helpers
@@ -43,7 +41,7 @@ def cast_tuple(val, depth):
     return val if isinstance(val, tuple) else (val, ) * depth
 
 
-class always:
+class always():
     def __init__(self, val):
         self.val = val
 
@@ -51,7 +49,7 @@ class always:
         return self.val
 
 
-class not_equals:
+class not_equals():
     def __init__(self, val):
         self.val = val
 
@@ -59,7 +57,7 @@ class not_equals:
         return x != self.val
 
 
-class equals:
+class equals():
     def __init__(self, val):
         self.val = val
 
@@ -69,6 +67,10 @@ class equals:
 
 def max_neg_value(tensor):
     return -paddle.to_tensor(np.finfo(convert_dtype(tensor.dtype)).max)
+
+
+def l2norm(t):
+    return F.normalize(t, p=2, axis=-1)
 
 
 # init helpers
@@ -134,7 +136,7 @@ class AbsolutePositionalEmbedding(nn.Layer):
     def forward(self, x):
         n = paddle.arange(x.shape[1])
         pos_emb = self.emb(n)
-        pos_emb = rearrange(pos_emb, "n d -> () n d")
+        pos_emb = rearrange(pos_emb, 'n d -> () n d')
         return pos_emb * self.scale
 
 
@@ -143,13 +145,13 @@ class FixedPositionalEmbedding(nn.Layer):
         super().__init__()
         inv_freq = 1.0 / (10000**(paddle.arange(
             0, dim, 2, dtype=paddle.get_default_dtype()) / dim))
-        self.register_buffer("inv_freq", inv_freq)
+        self.register_buffer('inv_freq', inv_freq)
 
     def forward(self, x, seq_dim=1, offset=0):
         t = paddle.arange(x.shape[seq_dim], dtype=self.inv_freq.dtype) + offset
-        sinusoid_inp = paddle.einsum("i , j -> i j", t, self.inv_freq)
+        sinusoid_inp = paddle.einsum('i , j -> i j', t, self.inv_freq)
         emb = paddle.concat((sinusoid_inp.sin(), sinusoid_inp.cos()), axis=-1)
-        return rearrange(emb, "n d -> () n d")
+        return rearrange(emb, 'n d -> () n d')
 
 
 class RelativePositionBias(nn.Layer):
@@ -213,14 +215,14 @@ class AlibiPositionalBias(nn.Layer):
         super().__init__()
         self.heads = heads
         slopes = paddle.to_tensor(self._get_slopes(heads))
-        slopes = rearrange(slopes, "h -> () h () ()")
-        self.register_buffer("slopes", slopes, persistent=False)
-        self.register_buffer("bias", None, persistent=False)
+        slopes = rearrange(slopes, 'h -> () h () ()')
+        self.register_buffer('slopes', slopes, persistent=False)
+        self.register_buffer('bias', None, persistent=False)
 
     @staticmethod
     def _get_slopes(heads):
         def get_slopes_power_of_2(n):
-            start = 2**(-(2**-(math.log2(n) - 3)))
+            start = (2**(-2**-(math.log2(n) - 3)))
             ratio = start
             return [start * ratio**i for i in range(n)]
 
@@ -228,9 +230,9 @@ class AlibiPositionalBias(nn.Layer):
             return get_slopes_power_of_2(heads)
 
         closest_power_of_2 = 2**math.floor(math.log2(heads))
-        return (
-            get_slopes_power_of_2(closest_power_of_2) + get_slopes_power_of_2(
-                2 * closest_power_of_2)[0::2][:heads - closest_power_of_2])
+        return get_slopes_power_of_2(
+            closest_power_of_2) + get_slopes_power_of_2(
+                2 * closest_power_of_2)[0::2][:heads - closest_power_of_2]
 
     def forward(self, qk_dots):
         h, i, j = qk_dots.shape[-3:]
@@ -279,7 +281,7 @@ class RotaryEmbedding(nn.Layer):
         self.register_buffer("inv_freq", inv_freq)
 
     def forward(self, max_seq_len):
-        t = paddle.arange(max_seq_len).type_as(self.inv_freq)
+        t = paddle.arange(max_seq_len).astype(self.inv_freq.dtype)
         freqs = paddle.einsum("i , j -> i j", t, self.inv_freq)
         emb = paddle.concat((freqs, freqs), axis=-1)
         return rearrange(emb, "n d -> () () n d")
@@ -422,15 +424,13 @@ class ShiftTokens(nn.Layer):
         self.shifts = tuple(shifts)
 
     def forward(self, x, **kwargs):
-        mask = kwargs.get("mask", None)
+        mask = kwargs.get('mask', None)
         shifts = self.shifts
         segments = len(shifts)
         feats_per_shift = x.shape[-1] // segments
         splitted = x.split(feats_per_shift, axis=-1)
         segments_to_shift, rest = splitted[:segments], splitted[segments:]
-        segments_to_shift = list(
-            map(lambda args: shift(*args, mask=mask), zip(segments_to_shift, shifts))
-        )
+        segments_to_shift = list(map(lambda args: shift(*args, mask = mask), zip(segments_to_shift, shifts)))
         x = paddle.concat((*segments_to_shift, *rest), axis=-1)
         return self.fn(x, **kwargs)
 
@@ -450,29 +450,29 @@ class GLU(nn.Layer):
 
 
 class FeedForward(nn.Layer):
-    def __init__(
-            self,
-            dim,
-            dim_out=None,
-            mult=4,
-            glu=False,
-            relu_squared=False,
-            post_act_ln=False,
-            dropout=0.0,
-            zero_init_output=False, ):
+    def __init__(self,
+                 dim,
+                 dim_out=None,
+                 mult=4,
+                 glu=False,
+                 relu_squared=False,
+                 post_act_ln=False,
+                 dropout=0.,
+                 zero_init_output=False):
         super().__init__()
         inner_dim = int(dim * mult)
         dim_out = default(dim_out, dim)
         activation = ReluSquared() if relu_squared else nn.GELU()
 
-        project_in = (nn.Sequential(nn.Linear(dim, inner_dim), activation)
-                      if not glu else GLU(dim, inner_dim, activation))
+        project_in = nn.Sequential(
+            nn.Linear(dim, inner_dim),
+            activation) if not glu else GLU(dim, inner_dim, activation)
 
-        self.net = nn.Sequential(
-            project_in,
-            nn.LayerNorm(inner_dim) if post_act_ln else nn.Identity(),
-            nn.Dropout(dropout),
-            nn.Linear(inner_dim, dim_out), )
+        self.net = nn.Sequential(project_in,
+                                 nn.LayerNorm(inner_dim)
+                                 if post_act_ln else nn.Identity(),
+                                 nn.Dropout(dropout),
+                                 nn.Linear(inner_dim, dim_out))
 
         # init last linear layer to 0
         if zero_init_output:
@@ -494,17 +494,20 @@ class Attention(nn.Layer):
                  talking_heads=False,
                  head_scale=False,
                  collab_heads=False,
-                 collab_compression=0.3,
+                 collab_compression=.3,
                  sparse_topk=None,
                  use_entmax15=False,
                  num_mem_kv=0,
-                 dropout=0.0,
+                 dropout=0.,
                  on_attn=False,
                  gate_values=False,
                  zero_init_output=False,
-                 max_attend_past=None):
+                 max_attend_past=None,
+                 qk_norm=False,
+                 scale_init_value=None):
         super().__init__()
         self.scale = dim_head**-0.5
+
         self.heads = heads
         self.causal = causal
         self.max_attend_past = max_attend_past
@@ -533,6 +536,16 @@ class Attention(nn.Layer):
                 paddle.zeros_like(self.to_v_gate.weight))
             self.to_v_gate.bias.set_value(
                 paddle.ones_like(self.to_v_gate.bias))
+
+        # cosine sim attention
+        self.qk_norm = qk_norm
+        if qk_norm:
+            scale_init_value = default(
+                scale_init_value, -3
+            )  # if not provided, initialize as though it were sequence length of 1024
+            self.scale = self.create_parameter(
+                (1, heads, 1, 1),
+                default_initializer=Constant(scale_init_value))
 
         # talking heads
         self.talking_heads = talking_heads
@@ -570,32 +583,26 @@ class Attention(nn.Layer):
 
         # attention on attention
         self.attn_on_attn = on_attn
-        self.to_out = (nn.Sequential(nn.Linear(v_dim, dim * 2), GLU())
-                       if on_attn else nn.Linear(v_dim, dim))
+        self.to_out = nn.Sequential(nn.Linear(
+            v_dim, dim * 2), GLU()) if on_attn else nn.Linear(v_dim, dim)
 
         # init output projection 0
         if zero_init_output:
             init_zero_(self.to_out)
 
-    def forward(
-            self,
-            x,
-            context=None,
-            mask=None,
-            context_mask=None,
-            attn_mask=None,
-            rel_pos=None,
-            sinusoidal_emb=None,
-            rotary_pos_emb=None,
-            prev_attn=None,
-            mem=None, ):
-        b, n, _, h, talking_heads, collab_heads, head_scale, has_context = (
-            *x.shape,
-            self.heads,
-            self.talking_heads,
-            self.collab_heads,
-            self.head_scale,
-            exists(context), )
+    def forward(self,
+                x,
+                context=None,
+                mask=None,
+                context_mask=None,
+                attn_mask=None,
+                rel_pos=None,
+                sinusoidal_emb=None,
+                rotary_pos_emb=None,
+                prev_attn=None,
+                mem=None):
+        b, n, _, h, talking_heads, collab_heads, head_scale, scale, has_context = *x.shape, self.heads, self.talking_heads, self.collab_heads, self.head_scale, self.scale, exists(
+            context)
         kv_input = default(context, x)
 
         q_input = x
@@ -617,13 +624,11 @@ class Attention(nn.Layer):
         v = self.to_v(v_input)
 
         if not collab_heads:
-            q, k, v = map(
-                lambda t: rearrange(t, "b n (h d) -> b h n d", h=h), (q, k, v)
-            )
+            q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
         else:
-            q = einsum("b i d, h d -> b h i d", q, self.collab_mixing)
-            k = rearrange(k, "b n d -> b () n d")
-            v = rearrange(v, "b n (h d) -> b h n d", h=h)
+            q = einsum('b i d, h d -> b h i d', q, self.collab_mixing)
+            k = rearrange(k, 'b n d -> b () n d')
+            v = rearrange(v, 'b n (h d) -> b h n d', h=h)
 
         if exists(rotary_pos_emb) and not has_context:
             l = rotary_pos_emb.shape[-1]
@@ -631,24 +636,20 @@ class Attention(nn.Layer):
                 lambda t: (t[..., :l], t[..., l:]), (q, k, v))
             ql, kl, vl = map(lambda t: apply_rotary_pos_emb(t, rotary_pos_emb),
                              (ql, kl, vl))
-            q, k, v = map(
-                lambda t: paddle.concat(t, axis=-1), ((ql, qr), (kl, kr), (vl, vr))
-            )
+            q, k, v = map(lambda t: paddle.concat(t, axis = -1), ((ql, qr), (kl, kr), (vl, vr)))
 
         input_mask = None
         if any(map(exists, (mask, context_mask))):
-            q_mask = default(mask, lambda: paddle.ones((b, n)).bool())
+            q_mask = default(mask, lambda: paddle.ones((b, n)).astype("bool"))
             k_mask = q_mask if not exists(context) else context_mask
-            k_mask = default(k_mask,
-                             lambda: paddle.ones((b, k.shape[-2])).bool())
-            q_mask = rearrange(q_mask, "b i -> b () i ()")
-            k_mask = rearrange(k_mask, "b j -> b () () j")
+            k_mask = default(
+                k_mask, lambda: paddle.ones((b, k.shape[-2])).astype("bool"))
+            q_mask = rearrange(q_mask, 'b i -> b () i ()')
+            k_mask = rearrange(k_mask, 'b j -> b () () j')
             input_mask = q_mask * k_mask
 
         if self.num_mem_kv > 0:
-            mem_k, mem_v = map(
-                lambda t: repeat(t, "h n d -> b h n d", b=b), (self.mem_k, self.mem_v)
-            )
+            mem_k, mem_v = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), (self.mem_k, self.mem_v))
             k = paddle.concat((mem_k, k), axis=-2)
             v = paddle.concat((mem_v, v), axis=-2)
             if exists(input_mask):
@@ -661,7 +662,11 @@ class Attention(nn.Layer):
         if collab_heads:
             k = k.expand(shape=[-1, h, -1, -1])
 
-        dots = einsum("b h i d, b h j d -> b h i j", q, k) * self.scale
+        if self.qk_norm:
+            q, k = map(l2norm, (q, k))
+            scale = 1 / (self.scale.exp().clip(min=1e-2))
+
+        dots = einsum('b h i d, b h j d -> b h i j', q, k) * scale
         mask_value = max_neg_value(dots)
 
         if exists(prev_attn):
@@ -670,7 +675,7 @@ class Attention(nn.Layer):
         pre_softmax_attn = dots.clone()
 
         if talking_heads:
-            dots = einsum("b h i j, h k -> b k i j", dots,
+            dots = einsum('b h i j, h k -> b k i j', dots,
                           self.pre_softmax_proj)
 
         if exists(rel_pos):
@@ -727,15 +732,15 @@ class Attention(nn.Layer):
         attn = self.dropout(attn)
 
         if talking_heads:
-            attn = einsum("b h i j, h k -> b k i j", attn,
+            attn = einsum('b h i j, h k -> b k i j', attn,
                           self.post_softmax_proj)
 
-        out = einsum("b h i j, b h j d -> b h i d", attn, v)
+        out = einsum('b h i j, b h j d -> b h i d', attn, v)
 
         if head_scale:
             out = out * self.head_scale_params
 
-        out = rearrange(out, "b h n d -> b n (h d)")
+        out = rearrange(out, 'b h n d -> b n (h d)')
 
         if exists(self.to_v_gate):
             gates = self.to_v_gate(x)
@@ -749,63 +754,62 @@ class Attention(nn.Layer):
 
 
 class AttentionLayers(nn.Layer):
-    def __init__(
-            self,
-            dim,
-            depth,
-            heads=8,
-            causal=False,
-            cross_attend=False,
-            only_cross=False,
-            use_scalenorm=False,
-            use_rmsnorm=False,
-            use_rezero=False,
-            alibi_pos_bias=False,
-            alibi_num_heads=None,
-            alibi_learned=False,
-            rel_pos_bias=False,
-            rel_pos_num_buckets=32,
-            rel_pos_max_distance=128,
-            position_infused_attn=False,
-            rotary_pos_emb=False,
-            rotary_emb_dim=None,
-            custom_layers=None,
-            sandwich_coef=None,
-            par_ratio=None,
-            residual_attn=False,
-            cross_residual_attn=False,
-            macaron=False,
-            pre_norm=True,
-            gate_residual=False,
-            scale_residual=False,
-            shift_tokens=0,
-            sandwich_norm=False,
-            zero_init_branch_output=False,
-            **kwargs, ):
+    def __init__(self,
+                 dim,
+                 depth,
+                 heads=8,
+                 causal=False,
+                 cross_attend=False,
+                 only_cross=False,
+                 use_scalenorm=False,
+                 use_rmsnorm=False,
+                 use_rezero=False,
+                 alibi_pos_bias=False,
+                 alibi_num_heads=None,
+                 alibi_learned=False,
+                 rel_pos_bias=False,
+                 rel_pos_num_buckets=32,
+                 rel_pos_max_distance=128,
+                 position_infused_attn=False,
+                 rotary_pos_emb=False,
+                 rotary_emb_dim=None,
+                 custom_layers=None,
+                 sandwich_coef=None,
+                 par_ratio=None,
+                 residual_attn=False,
+                 cross_residual_attn=False,
+                 macaron=False,
+                 pre_norm=True,
+                 gate_residual=False,
+                 scale_residual=False,
+                 shift_tokens=0,
+                 sandwich_norm=False,
+                 use_qk_norm_attn=False,
+                 qk_norm_attn_seq_len=None,
+                 zero_init_branch_output=False,
+                 **kwargs):
         super().__init__()
-        ff_kwargs, kwargs = groupby_prefix_and_trim("ff_", kwargs)
-        attn_kwargs, _ = groupby_prefix_and_trim("attn_", kwargs)
+        ff_kwargs, kwargs = groupby_prefix_and_trim('ff_', kwargs)
+        attn_kwargs, _ = groupby_prefix_and_trim('attn_', kwargs)
 
-        dim_head = attn_kwargs.get("dim_head", DEFAULT_DIM_HEAD)
+        dim_head = attn_kwargs.get('dim_head', DEFAULT_DIM_HEAD)
 
         self.dim = dim
         self.depth = depth
         self.layers = nn.LayerList([])
 
         self.has_pos_emb = position_infused_attn or rel_pos_bias or rotary_pos_emb
-        self.pia_pos_emb = (FixedPositionalEmbedding(dim)
-                            if position_infused_attn else None)
+        self.pia_pos_emb = FixedPositionalEmbedding(
+            dim) if position_infused_attn else None
 
         rotary_emb_dim = max(default(rotary_emb_dim, dim_head // 2), 32)
-        self.rotary_pos_emb = (RotaryEmbedding(rotary_emb_dim)
-                               if rotary_pos_emb else None)
+        self.rotary_pos_emb = RotaryEmbedding(
+            rotary_emb_dim) if rotary_pos_emb else None
 
         assert not (
             alibi_pos_bias and rel_pos_bias
-        ), "you can only choose Alibi positional bias or T5 relative positional bias, not both"
-        assert (
-            rel_pos_num_buckets <= rel_pos_max_distance
-        ), "number of relative position buckets must be less than the relative position max distance"
+        ), 'you can only choose Alibi positional bias or T5 relative positional bias, not both'
+        assert rel_pos_num_buckets <= rel_pos_max_distance, 'number of relative position buckets must be less than the relative position max distance'
 
         if rel_pos_bias:
             self.rel_pos = RelativePositionBias(
@@ -813,23 +817,18 @@ class AttentionLayers(nn.Layer):
                 causal=causal,
                 heads=heads,
                 num_buckets=rel_pos_num_buckets,
-                max_distance=rel_pos_max_distance, )
+                max_distance=rel_pos_max_distance)
         elif alibi_pos_bias:
             alibi_num_heads = default(alibi_num_heads, heads)
-            assert (
-                alibi_num_heads <= heads
-            ), "number of ALiBi heads must be less than the total number of heads"
-            assert (
-                causal
-            ), "ALiBi currently does not work with non-autoregressive mode just yet"
-            alibi_pos_klass = (LearnedAlibiPositionalBias
-                               if alibi_learned else AlibiPositionalBias)
+            assert alibi_num_heads <= heads, 'number of ALiBi heads must be less than the total number of heads'
+            assert causal, 'ALiBi currently does not work with non-autoregressive mode just yet'
+            alibi_pos_klass = LearnedAlibiPositionalBias if alibi_learned else AlibiPositionalBias
             self.rel_pos = alibi_pos_klass(heads=alibi_num_heads)
         else:
             self.rel_pos = None
 
         assert not (not pre_norm and sandwich_norm
-                    ), "sandwich norm cannot be used when not using prenorm"
+                    ), 'sandwich norm cannot be used when not using prenorm'
         self.pre_norm = pre_norm
         self.sandwich_norm = sandwich_norm
 
@@ -845,20 +844,33 @@ class AttentionLayers(nn.Layer):
         branch_fn = Rezero if use_rezero else None
 
         if cross_attend and not only_cross:
-            default_block = ("a", "c", "f")
+            default_block = ('a', 'c', 'f')
         elif cross_attend and only_cross:
-            default_block = ("c", "f")
+            default_block = ('c', 'f')
         else:
-            default_block = ("a", "f")
+            default_block = ('a', 'f')
 
         if macaron:
-            default_block = ("f", ) + default_block
+            default_block = ('f', ) + default_block
+
+        # qk normalization
+
+        if use_qk_norm_attn:
+            attn_scale_init_value = -math.log(
+                math.log2(qk_norm_attn_seq_len**2 - qk_norm_attn_seq_len)
+            ) if exists(qk_norm_attn_seq_len) else None
+            attn_kwargs = {
+                **
+                attn_kwargs,
+                'qk_norm': True,
+                'scale_init_value': attn_scale_init_value
+            }
 
         # zero init
 
         if zero_init_branch_output:
-            attn_kwargs = { ** attn_kwargs, "zero_init_output": True}
-            ff_kwargs = { ** ff_kwargs, "zero_init_output": True}
+            attn_kwargs = { ** attn_kwargs, 'zero_init_output': True}
+            ff_kwargs = { ** ff_kwargs, 'zero_init_output': True}
 
         # calculate layer block order
 
@@ -866,29 +878,27 @@ class AttentionLayers(nn.Layer):
             layer_types = custom_layers
         elif exists(par_ratio):
             par_depth = depth * len(default_block)
-            assert 1 < par_ratio <= par_depth, "par ratio out of range"
-            default_block = tuple(filter(not_equals("f"), default_block))
+            assert 1 < par_ratio <= par_depth, 'par ratio out of range'
+            default_block = tuple(filter(not_equals('f'), default_block))
             par_attn = par_depth // par_ratio
-            depth_cut = (
-                par_depth * 2 //
-                3)  # 2 / 3 attention layer cutoff suggested by PAR paper
+            depth_cut = par_depth * 2 // 3  # 2 / 3 attention layer cutoff suggested by PAR paper
             par_width = (depth_cut + depth_cut // par_attn) // par_attn
-            assert (len(default_block) <= par_width
-                    ), "default block is too large for par_ratio"
-            par_block = default_block + ("f", ) * (par_width -
+            assert len(
+                default_block
+            ) <= par_width, 'default block is too large for par_ratio'
+            par_block = default_block + ('f', ) * (par_width -
                                                    len(default_block))
             par_head = par_block * par_attn
-            layer_types = par_head + ("f", ) * (par_depth - len(par_head))
+            layer_types = par_head + ('f', ) * (par_depth - len(par_head))
         elif exists(sandwich_coef):
-            assert (sandwich_coef > 0 and sandwich_coef <= depth
-                    ), "sandwich coefficient should be less than the depth"
-            layer_types = (("a", ) * sandwich_coef + default_block *
-                           (depth - sandwich_coef) + ("f", ) * sandwich_coef)
+            assert sandwich_coef > 0 and sandwich_coef <= depth, 'sandwich coefficient should be less than the depth'
+            layer_types = ('a', ) * sandwich_coef + default_block * (
+                depth - sandwich_coef) + ('f', ) * sandwich_coef
         else:
             layer_types = default_block * depth
 
         self.layer_types = layer_types
-        self.num_attn_layers = len(list(filter(equals("a"), layer_types)))
+        self.num_attn_layers = len(list(filter(equals('a'), layer_types)))
 
         # calculate token shifting
 
@@ -896,18 +906,20 @@ class AttentionLayers(nn.Layer):
 
         # iterate and construct layers
 
-        for layer_type, layer_shift_tokens in zip(self.layer_types,
-                                                  shift_tokens):
-            if layer_type == "a":
+        for ind, (layer_type, layer_shift_tokens
+                  ) in enumerate(zip(self.layer_types, shift_tokens)):
+            is_last_layer = ind == (len(self.layer_types) - 1)
+
+            if layer_type == 'a':
                 layer = Attention(
                     dim, heads=heads, causal=causal, **attn_kwargs)
-            elif layer_type == "c":
+            elif layer_type == 'c':
                 layer = Attention(dim, heads=heads, **attn_kwargs)
-            elif layer_type == "f":
+            elif layer_type == 'f':
                 layer = FeedForward(dim, **ff_kwargs)
                 layer = layer if not macaron else Scale(0.5, layer)
             else:
-                raise Exception(f"invalid layer type {layer_type}")
+                raise Exception(f'invalid layer type {layer_type}')
 
             if layer_shift_tokens > 0:
                 shift_range_upper = layer_shift_tokens + 1
@@ -921,25 +933,29 @@ class AttentionLayers(nn.Layer):
             residual_fn = GRUGating if gate_residual else Residual
             residual = residual_fn(dim, scale_residual=scale_residual)
 
-            if sandwich_norm:
-                norm = nn.LayerList([norm_fn(), norm_fn()])
-            else:
-                norm = norm_fn()
+            pre_branch_norm = norm_fn(
+            ) if sandwich_norm and not use_qk_norm_attn else None
+            post_branch_norm = norm_fn(
+            ) if sandwich_norm or use_qk_norm_attn else None
+            post_main_norm = norm_fn(
+            ) if not pre_norm and not is_last_layer else None
 
-            self.layers.append(nn.LayerList([norm, layer, residual]))
+            norms = nn.LayerList(
+                [pre_branch_norm, post_branch_norm, post_main_norm])
 
-    def forward(
-            self,
-            x,
-            context=None,
-            mask=None,
-            context_mask=None,
-            attn_mask=None,
-            mems=None,
-            return_hiddens=False, ):
+            self.layers.append(nn.LayerList([norms, layer, residual]))
+
+    def forward(self,
+                x,
+                context=None,
+                mask=None,
+                context_mask=None,
+                attn_mask=None,
+                mems=None,
+                return_hiddens=False):
         assert not (
             self.cross_attend ^ exists(context)
-        ), "context must be passed in if cross_attend is set to True"
+        ), 'context must be passed in if cross_attend is set to True'
 
         hiddens = []
         intermediates = []
@@ -962,19 +978,18 @@ class AttentionLayers(nn.Layer):
              residual_fn)) in enumerate(zip(self.layer_types, self.layers)):
             is_last = ind == (len(self.layers) - 1)
 
-            if layer_type == "a":
+            if layer_type == 'a':
                 hiddens.append(x)
                 layer_mem = mems.pop(0) if mems else None
 
             residual = x
 
-            if self.sandwich_norm:
-                norm, postnorm = norm
+            pre_branch_norm, post_branch_norm, post_main_norm = norm
 
-            if self.pre_norm:
-                x = norm(x)
+            if exists(pre_branch_norm):
+                x = pre_branch_norm(x)
 
-            if layer_type == "a":
+            if layer_type == 'a':
                 out, inter = block(
                     x,
                     mask=mask,
@@ -983,32 +998,32 @@ class AttentionLayers(nn.Layer):
                     rel_pos=self.rel_pos,
                     rotary_pos_emb=rotary_pos_emb,
                     prev_attn=prev_attn,
-                    mem=layer_mem, )
-            elif layer_type == "c":
+                    mem=layer_mem)
+            elif layer_type == 'c':
                 out, inter = block(
                     x,
                     context=context,
                     mask=mask,
                     context_mask=context_mask,
-                    prev_attn=prev_cross_attn, )
-            elif layer_type == "f":
+                    prev_attn=prev_cross_attn)
+            elif layer_type == 'f':
                 out = block(x)
 
-            if self.sandwich_norm:
-                out = postnorm(out)
+            if exists(post_branch_norm):
+                out = post_branch_norm(out)
 
             x = residual_fn(out, residual)
 
-            if layer_type in ("a", "c"):
+            if layer_type in ('a', 'c'):
                 intermediates.append(inter)
 
-            if layer_type == "a" and self.residual_attn:
+            if layer_type == 'a' and self.residual_attn:
                 prev_attn = inter.pre_softmax_attn
-            elif layer_type == "c" and self.cross_residual_attn:
+            elif layer_type == 'c' and self.cross_residual_attn:
                 prev_cross_attn = inter.pre_softmax_attn
 
-            if not self.pre_norm and not is_last:
-                x = norm(x)
+            if exists(post_main_norm):
+                x = post_main_norm(x)
 
         if return_hiddens:
             intermediates = LayerIntermediates(
@@ -1021,13 +1036,13 @@ class AttentionLayers(nn.Layer):
 
 class Encoder(AttentionLayers):
     def __init__(self, **kwargs):
-        assert "causal" not in kwargs, "cannot set causality on encoder"
+        assert 'causal' not in kwargs, 'cannot set causality on encoder'
         super().__init__(causal=False, **kwargs)
 
 
 class Decoder(AttentionLayers):
     def __init__(self, **kwargs):
-        assert "causal" not in kwargs, "cannot set causality on decoder"
+        assert 'causal' not in kwargs, 'cannot set causality on decoder'
         super().__init__(causal=True, **kwargs)
 
 
@@ -1096,23 +1111,22 @@ class ViTransformerWrapper(nn.Layer):
 
 
 class TransformerWrapper(nn.Layer):
-    def __init__(
-            self,
-            *,
-            num_tokens,
-            max_seq_len,
-            attn_layers,
-            emb_dim=None,
-            max_mem_len=0.0,
-            shift_mem_down=0,
-            emb_dropout=0.0,
-            num_memory_tokens=None,
-            tie_embedding=False,
-            use_pos_emb=True, ):
+    def __init__(self,
+                 *,
+                 num_tokens,
+                 max_seq_len,
+                 attn_layers,
+                 emb_dim=None,
+                 max_mem_len=0.,
+                 shift_mem_down=0,
+                 emb_dropout=0.,
+                 num_memory_tokens=None,
+                 tie_embedding=False,
+                 use_pos_emb=True):
         super().__init__()
         assert isinstance(
             attn_layers, AttentionLayers
-        ), "attention layers must be one of Encoder or Decoder"
+        ), 'attention layers must be one of Encoder or Decoder'
 
         dim = attn_layers.dim
         emb_dim = default(emb_dim, dim)
@@ -1123,9 +1137,8 @@ class TransformerWrapper(nn.Layer):
 
         self.token_emb = nn.Embedding(
             num_tokens, emb_dim, weight_attr=KaimingNormal())
-        self.pos_emb = (AbsolutePositionalEmbedding(emb_dim, max_seq_len)
-                        if (use_pos_emb and not attn_layers.has_pos_emb) else
-                        always(0))
+        self.pos_emb = AbsolutePositionalEmbedding(emb_dim, max_seq_len) if (
+            use_pos_emb and not attn_layers.has_pos_emb) else always(0)
         self.emb_dropout = nn.Dropout(emb_dropout)
 
         self.project_emb = nn.Linear(emb_dim,
@@ -1145,15 +1158,14 @@ class TransformerWrapper(nn.Layer):
                 default_initializer=Assign(
                     paddle.randn((num_memory_tokens, dim))), )
 
-    def forward(
-            self,
-            x,
-            return_embeddings=False,
-            mask=None,
-            return_mems=False,
-            return_attn=False,
-            mems=None,
-            **kwargs, ):
+    def forward(self,
+                x,
+                return_embeddings=False,
+                mask=None,
+                return_mems=False,
+                return_attn=False,
+                mems=None,
+                **kwargs):
         b, n, num_mem = *x.shape, self.num_memory_tokens
         x = self.token_emb(x)
         x = x + self.pos_emb(x)
@@ -1162,7 +1174,7 @@ class TransformerWrapper(nn.Layer):
         x = self.project_emb(x)
 
         if num_mem > 0:
-            mem = repeat(self.memory_tokens, "n d -> b n d", b=b)
+            mem = repeat(self.memory_tokens, 'n d -> b n d', b=b)
             x = paddle.concat((mem, x), axis=1)
 
             # auto-handle masking after appending memory tokens
@@ -1195,11 +1207,7 @@ class TransformerWrapper(nn.Layer):
 
         if return_mems:
             hiddens = intermediates.hiddens
-            new_mems = (
-                list(map(lambda pair: paddle.concat(pair, axis=-2), zip(mems, hiddens)))
-                if exists(mems)
-                else hiddens
-            )
+            new_mems = list(map(lambda pair: paddle.concat(pair, axis = -2), zip(mems, hiddens))) if exists(mems) else hiddens
             new_mems = list(
                 map(lambda t: t[..., -self.max_mem_len:, :].detach(),
                     new_mems))
@@ -1215,28 +1223,26 @@ class TransformerWrapper(nn.Layer):
 
 
 class ContinuousTransformerWrapper(nn.Layer):
-    def __init__(
-            self,
-            *,
-            max_seq_len,
-            attn_layers,
-            dim_in=None,
-            dim_out=None,
-            emb_dim=None,
-            emb_dropout=0.0,
-            use_pos_emb=True, ):
+    def __init__(self,
+                 *,
+                 max_seq_len,
+                 attn_layers,
+                 dim_in=None,
+                 dim_out=None,
+                 emb_dim=None,
+                 emb_dropout=0.,
+                 use_pos_emb=True):
         super().__init__()
         assert isinstance(
             attn_layers, AttentionLayers
-        ), "attention layers must be one of Encoder or Decoder"
+        ), 'attention layers must be one of Encoder or Decoder'
 
         dim = attn_layers.dim
 
         self.max_seq_len = max_seq_len
 
-        self.pos_emb = (AbsolutePositionalEmbedding(dim, max_seq_len)
-                        if (use_pos_emb and not attn_layers.has_pos_emb) else
-                        always(0))
+        self.pos_emb = AbsolutePositionalEmbedding(dim, max_seq_len) if (
+            use_pos_emb and not attn_layers.has_pos_emb) else always(0)
         self.emb_dropout = nn.Dropout(emb_dropout)
 
         self.project_in = nn.Linear(dim_in,
@@ -1248,14 +1254,13 @@ class ContinuousTransformerWrapper(nn.Layer):
         self.project_out = nn.Linear(
             dim, dim_out) if exists(dim_out) else nn.Identity()
 
-    def forward(
-            self,
-            x,
-            return_embeddings=False,
-            mask=None,
-            return_attn=False,
-            mems=None,
-            **kwargs, ):
+    def forward(self,
+                x,
+                return_embeddings=False,
+                mask=None,
+                return_attn=False,
+                mems=None,
+                **kwargs):
         b, n, _ = x.shape
 
         x = self.project_in(x)
@@ -1280,22 +1285,20 @@ class ContinuousTransformerWrapper(nn.Layer):
 class XTransformer(nn.Layer):
     def __init__(self, *, dim, tie_token_emb=False, **kwargs):
         super().__init__()
-        enc_kwargs, kwargs = groupby_prefix_and_trim("enc_", kwargs)
-        dec_kwargs, kwargs = groupby_prefix_and_trim("dec_", kwargs)
+        enc_kwargs, kwargs = groupby_prefix_and_trim('enc_', kwargs)
+        dec_kwargs, kwargs = groupby_prefix_and_trim('dec_', kwargs)
 
-        assert (
-            "dim" not in enc_kwargs and "dim" not in dec_kwargs
-        ), "dimension of either encoder or decoder must be set with `dim` keyword"
-        enc_transformer_kwargs = pick_and_pop(["num_tokens", "max_seq_len"],
+        assert 'dim' not in enc_kwargs and 'dim' not in dec_kwargs, 'dimension of either encoder or decoder must be set with `dim` keyword'
+        enc_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'],
                                               enc_kwargs)
-        enc_transformer_kwargs["emb_dropout"] = enc_kwargs.pop("emb_dropout",
+        enc_transformer_kwargs['emb_dropout'] = enc_kwargs.pop('emb_dropout',
                                                                0)
-        enc_transformer_kwargs["num_memory_tokens"] = enc_kwargs.pop(
-            "num_memory_tokens", None)
+        enc_transformer_kwargs['num_memory_tokens'] = enc_kwargs.pop(
+            'num_memory_tokens', None)
 
-        dec_transformer_kwargs = pick_and_pop(["num_tokens", "max_seq_len"],
+        dec_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'],
                                               dec_kwargs)
-        dec_transformer_kwargs["emb_dropout"] = dec_kwargs.pop("emb_dropout",
+        dec_transformer_kwargs['emb_dropout'] = dec_kwargs.pop('emb_dropout',
                                                                0)
 
         self.encoder = TransformerWrapper(
@@ -1306,7 +1309,7 @@ class XTransformer(nn.Layer):
         self.decoder = TransformerWrapper(
             **dec_transformer_kwargs,
             attn_layers=Decoder(
-                dim=dim, cross_attend=True, **dec_kwargs), )
+                dim=dim, cross_attend=True, **dec_kwargs))
 
         if tie_token_emb:
             self.decoder.token_emb = self.encoder.token_emb
@@ -1314,14 +1317,13 @@ class XTransformer(nn.Layer):
         self.decoder = AutoregressiveWrapper(self.decoder)
 
     @paddle.no_grad()
-    def generate(
-            self,
-            seq_in,
-            seq_out_start,
-            seq_len,
-            src_mask=None,
-            src_attn_mask=None,
-            **kwargs, ):
+    def generate(self,
+                 seq_in,
+                 seq_out_start,
+                 seq_len,
+                 src_mask=None,
+                 src_attn_mask=None,
+                 **kwargs):
         encodings = self.encoder(
             seq_in,
             mask=src_mask,
